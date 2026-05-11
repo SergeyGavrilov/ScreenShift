@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch, call
 
 import src.switcher as switcher_module
 from src.display import DISP_CHANGE_SUCCESSFUL
-from src.switcher import switch_to, _lock
+from src.switcher import switch_to, restore_previous, _lock
 
 
 _PROFILE = {
@@ -163,3 +163,83 @@ def test_concurrent_call_is_dropped():
         assert results == [], "second call should be silently dropped while lock is held"
     finally:
         _lock.release()
+
+
+# ── snapshot / restore_previous ───────────────────────────────────────────────
+
+def _display(name, active, **kw):
+    d = {'name': name, 'active': active, 'primary': active}
+    d.update(kw)
+    return d
+
+
+def test_previous_state_saved_on_success():
+    switcher_module._previous_state = None
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        MockDM.list_displays.return_value = [_display('\\\\.\\DISPLAY1', True)]
+        MockDM.get_current_settings.return_value = {
+            'width': 1920, 'height': 1080, 'refresh_rate': 60,
+            'position_x': 0, 'position_y': 0,
+        }
+        _ok(MockDM)
+        switch_to(_PROFILE)
+    assert switcher_module._previous_state is not None
+
+
+def test_previous_state_not_saved_on_failure():
+    switcher_module._previous_state = None
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        MockDM.list_displays.return_value = []
+        _ok(MockDM)
+        MockDM.apply_changes.return_value = -1
+        switch_to(_PROFILE)
+    assert switcher_module._previous_state is None
+
+
+def test_restore_previous_notifies_nothing_to_restore():
+    switcher_module._previous_state = None
+    notify = MagicMock()
+    restore_previous(notify=notify)
+    notify.assert_called_once_with('Nothing to restore')
+
+
+def test_restore_previous_calls_switch_to():
+    switcher_module._previous_state = [
+        {
+            'device': '\\\\.\\DISPLAY1', 'enabled': True,
+            'width': 1920, 'height': 1080, 'refresh_rate': 60,
+            'position_x': 0, 'position_y': 0,
+        },
+        {'device': '\\\\.\\DISPLAY2', 'enabled': False},
+    ]
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        MockDM.list_displays.return_value = []
+        _ok(MockDM)
+        restore_previous()
+    MockDM.apply_changes.assert_called_once()
+
+
+def test_restore_re_enables_previously_active_monitors():
+    switcher_module._previous_state = [
+        {
+            'device': '\\\\.\\DISPLAY1', 'enabled': True,
+            'width': 2560, 'height': 1440, 'refresh_rate': 144,
+            'position_x': 0, 'position_y': 0,
+        },
+    ]
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        MockDM.list_displays.return_value = []
+        _ok(MockDM)
+        restore_previous()
+    MockDM.enable_display.assert_called_once_with(
+        '\\\\.\\DISPLAY1',
+        width=2560, height=1440, refresh_rate=144, position_x=0, position_y=0,
+    )

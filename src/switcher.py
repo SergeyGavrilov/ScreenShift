@@ -1,20 +1,56 @@
 import threading
 import time
+from typing import Optional
 
 from src.display import DisplayManager, DISP_CHANGE_SUCCESSFUL
 from src.migrator import WindowMigrator
 
-_lock = threading.Lock()
+_lock           = threading.Lock()
+_previous_state: Optional[list] = None   # snapshot taken before the last successful switch
 
+
+# ── snapshot helpers ──────────────────────────────────────────────────────────
+
+def _snapshot() -> list[dict]:
+    """Capture the current active/inactive state of all known displays."""
+    result = []
+    for d in DisplayManager.list_displays():
+        entry: dict = {'device': d['name'], 'enabled': d['active']}
+        if d['active']:
+            settings = DisplayManager.get_current_settings(d['name'])
+            if settings:
+                entry.update(settings)
+        result.append(entry)
+    return result
+
+
+def _snapshot_to_profile(state: list[dict], name: str = 'Previous') -> dict:
+    monitors = {}
+    for entry in state:
+        if entry['enabled']:
+            monitors[entry['device']] = {
+                'enabled':      True,
+                'width':        entry.get('width',        1920),
+                'height':       entry.get('height',       1080),
+                'refresh_rate': entry.get('refresh_rate', 60),
+                'position_x':   entry.get('position_x',  0),
+                'position_y':   entry.get('position_y',  0),
+            }
+        else:
+            monitors[entry['device']] = {'enabled': False}
+    return {'name': name, 'monitors': monitors}
+
+
+# ── public API ────────────────────────────────────────────────────────────────
 
 def switch_to(profile: dict, notify=None) -> None:
+    global _previous_state
     if not _lock.acquire(blocking=False):
         return
     try:
-        monitors_cfg = profile.get('monitors', {})
+        snapshot = _snapshot()
 
-        # Enable monitors before disabling — ensures at least one display stays
-        # active throughout the staging phase so Windows doesn't reject requests.
+        monitors_cfg = profile.get('monitors', {})
         ordered = sorted(monitors_cfg.items(), key=lambda kv: not kv[1].get('enabled', False))
 
         failed = []
@@ -42,6 +78,7 @@ def switch_to(profile: dict, notify=None) -> None:
         result = DisplayManager.apply_changes()
 
         if result == DISP_CHANGE_SUCCESSFUL:
+            _previous_state = snapshot   # commit snapshot only on success
             time.sleep(1.5)
             WindowMigrator.migrate_all()
             if notify:
@@ -51,3 +88,13 @@ def switch_to(profile: dict, notify=None) -> None:
                 notify(f"Display change failed (code {result})")
     finally:
         _lock.release()
+
+
+def restore_previous(notify=None) -> None:
+    """Re-apply the display state captured before the last successful switch."""
+    if not _previous_state:
+        if notify:
+            notify('Nothing to restore')
+        return
+    profile = _snapshot_to_profile(_previous_state)
+    switch_to(profile, notify=notify)

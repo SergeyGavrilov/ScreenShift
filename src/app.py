@@ -9,7 +9,8 @@ from PIL import Image, ImageDraw
 from src.autostart import autostart_enable
 from src.config import APP_NAME, CONFIG_PATH, Config
 from src.display import DisplayManager
-from src.switcher import switch_to
+import src.switcher as _switcher
+from src.switcher import switch_to, restore_previous
 
 
 def _make_icon() -> Image.Image:
@@ -43,6 +44,13 @@ class ScreenShiftApp:
                         target=switch_to, args=(prof, self._notify), daemon=True,
                     ).start(),
                 )
+        if self.cfg.restore_hotkey:
+            keyboard.add_hotkey(
+                self.cfg.restore_hotkey,
+                lambda: threading.Thread(
+                    target=restore_previous, args=(self._notify,), daemon=True,
+                ).start(),
+            )
 
     def _notify(self, msg: str) -> None:
         if self.icon:
@@ -59,7 +67,17 @@ class ScreenShiftApp:
                     target=switch_to, args=(prof, self._notify), daemon=True,
                 ).start(),
             ))
+        restore_hk    = self.cfg.restore_hotkey
+        restore_label = f'Restore previous  [{restore_hk}]' if restore_hk else 'Restore previous'
         items += [
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(
+                restore_label,
+                lambda _: threading.Thread(
+                    target=restore_previous, args=(self._notify,), daemon=True,
+                ).start(),
+                enabled=lambda _: _switcher._previous_state is not None,
+            ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('List Monitors', lambda _: threading.Thread(
                 target=self._show_monitors, daemon=True,

@@ -8,6 +8,7 @@ CONFIG_PATH = BASE_DIR / "config.json"
 
 DEFAULT_CONFIG = {
     "autostart": True,
+    "restore_hotkey": "ctrl+alt+0",
     "profiles": [
         {
             "name": "Work",
@@ -65,3 +66,7 @@ class Config:
     @property
     def autostart(self) -> bool:
         return self.data.get('autostart', False)
+
+    @property
+    def restore_hotkey(self) -> str:
+        return self.data.get('restore_hotkey', '')
