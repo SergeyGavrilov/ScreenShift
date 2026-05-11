@@ -109,14 +109,27 @@ class DisplayManager:
                        refresh_rate: int, position_x: int, position_y: int,
                        bpp: int = 32) -> int:
         dm = DEVMODE()
-        dm.dmSize             = ctypes.sizeof(DEVMODE)
-        dm.dmFields           = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION | DM_DISPLAYFREQUENCY | DM_BITSPERPEL
-        dm.dmPelsWidth        = width
-        dm.dmPelsHeight       = height
-        dm.dmPositionX        = position_x
-        dm.dmPositionY        = position_y
-        dm.dmDisplayFrequency = refresh_rate
-        dm.dmBitsPerPel       = bpp
+        dm.dmSize = ctypes.sizeof(DEVMODE)
+        # Prefer the monitor's own registry-stored settings over config values.
+        # After a previous switch the registry already holds the correct mode;
+        # sending hardcoded values can fail if they don't exactly match a
+        # supported mode (e.g. 60 vs 59.94 Hz), causing apply_changes() to
+        # silently succeed with nothing actually staged.
+        has_reg = ctypes.windll.user32.EnumDisplaySettingsW(
+            device, ENUM_REGISTRY_SETTINGS, ctypes.byref(dm),
+        )
+        if has_reg and dm.dmPelsWidth > 0:
+            dm.dmPositionX  = position_x
+            dm.dmPositionY  = position_y
+            dm.dmFields    |= DM_POSITION
+        else:
+            dm.dmFields           = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION | DM_DISPLAYFREQUENCY | DM_BITSPERPEL
+            dm.dmPelsWidth        = width
+            dm.dmPelsHeight       = height
+            dm.dmPositionX        = position_x
+            dm.dmPositionY        = position_y
+            dm.dmDisplayFrequency = refresh_rate
+            dm.dmBitsPerPel       = bpp
         return ctypes.windll.user32.ChangeDisplaySettingsExW(
             device, ctypes.byref(dm), None, CDS_UPDATEREGISTRY | CDS_NORESET, None,
         )

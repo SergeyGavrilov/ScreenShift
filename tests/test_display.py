@@ -138,6 +138,7 @@ def test_list_displays_skips_mirror_driver(mock_windll):
 # ── enable_display ────────────────────────────────────────────────────────────
 
 def test_enable_display_calls_api(mock_windll):
+    mock_windll.user32.EnumDisplaySettingsW.return_value = 0  # no registry entry
     mock_windll.user32.ChangeDisplaySettingsExW.return_value = DISP_CHANGE_SUCCESSFUL
 
     result = DisplayManager.enable_display(
@@ -149,7 +150,9 @@ def test_enable_display_calls_api(mock_windll):
     assert result == DISP_CHANGE_SUCCESSFUL
 
 
-def test_enable_display_devmode_fields(mock_windll):
+def test_enable_display_uses_config_when_no_registry(mock_windll):
+    # EnumDisplaySettingsW returns 0 → fall back to config values
+    mock_windll.user32.EnumDisplaySettingsW.return_value = 0
     captured = {}
 
     def capture(device, dm_ptr, hwnd, flags, param):
@@ -177,6 +180,41 @@ def test_enable_display_devmode_fields(mock_windll):
     assert captured['x']       == 10
     assert captured['y']       == 20
     assert captured['fields']  == DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION | DM_DISPLAYFREQUENCY | DM_BITSPERPEL
+
+
+def test_enable_display_uses_registry_when_available(mock_windll):
+    # EnumDisplaySettingsW succeeds with stored settings → use those, only override position
+    def fake_settings(device, mode, dm_ptr, *a):
+        dm = dm_ptr._obj
+        dm.dmPelsWidth        = 2560
+        dm.dmPelsHeight       = 1440
+        dm.dmDisplayFrequency = 144
+        dm.dmFields           = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY
+        return 1
+
+    mock_windll.user32.EnumDisplaySettingsW.side_effect = fake_settings
+    captured = {}
+
+    def capture_change(device, dm_ptr, hwnd, flags, param):
+        dm = dm_ptr._obj
+        captured['width']  = dm.dmPelsWidth
+        captured['height'] = dm.dmPelsHeight
+        captured['x']      = dm.dmPositionX
+        captured['y']      = dm.dmPositionY
+        return DISP_CHANGE_SUCCESSFUL
+
+    mock_windll.user32.ChangeDisplaySettingsExW.side_effect = capture_change
+
+    DisplayManager.enable_display(
+        '\\\\.\\DISPLAY1', width=1920, height=1080,   # config values — should be ignored
+        refresh_rate=60, position_x=5, position_y=10,
+    )
+
+    # Registry values preserved, only position overridden
+    assert captured['width']  == 2560
+    assert captured['height'] == 1440
+    assert captured['x']      == 5
+    assert captured['y']      == 10
 
 
 # ── disable_display ───────────────────────────────────────────────────────────

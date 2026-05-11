@@ -11,9 +11,16 @@ def switch_to(profile: dict, notify=None) -> None:
     if not _lock.acquire(blocking=False):
         return
     try:
-        for device, cfg in profile.get('monitors', {}).items():
+        monitors_cfg = profile.get('monitors', {})
+
+        # Enable monitors before disabling — ensures at least one display stays
+        # active throughout the staging phase so Windows doesn't reject requests.
+        ordered = sorted(monitors_cfg.items(), key=lambda kv: not kv[1].get('enabled', False))
+
+        failed = []
+        for device, cfg in ordered:
             if cfg.get('enabled'):
-                DisplayManager.enable_display(
+                ret = DisplayManager.enable_display(
                     device,
                     width=cfg['width'],
                     height=cfg['height'],
@@ -22,7 +29,15 @@ def switch_to(profile: dict, notify=None) -> None:
                     position_y=cfg.get('position_y', 0),
                 )
             else:
-                DisplayManager.disable_display(device)
+                ret = DisplayManager.disable_display(device)
+
+            if ret != DISP_CHANGE_SUCCESSFUL:
+                failed.append(f"{device.replace('\\\\.\\', '')} → code {ret}")
+
+        if failed:
+            if notify:
+                notify(f"Staging failed: {', '.join(failed)}")
+            return
 
         result = DisplayManager.apply_changes()
 
