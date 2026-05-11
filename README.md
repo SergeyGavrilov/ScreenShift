@@ -30,6 +30,53 @@ ScreenShift sits in your system tray and lets you switch between named display p
 - `pywin32` — window enumeration and movement
 - Distributed as a standalone `.exe` via PyInstaller
 
+## Setup
+
+```bash
+pip install -r requirements.txt
+python screenshift.py
+```
+
+Or build a standalone `.exe`:
+
+```bash
+build.bat
+```
+
+The `.exe` and `config.json` must be in the same folder.
+
+## Configuration
+
+Edit `config.json` to set up your monitor profiles.
+
+First run **List Monitors** from the tray menu to see your display device names (`\\.\DISPLAY1`, etc.), then fill them into the config.
+
+```json
+{
+  "autostart": true,
+  "profiles": [
+    {
+      "name": "Work",
+      "hotkey": "ctrl+alt+1",
+      "monitors": {
+        "\\\\.\\DISPLAY1": {
+          "enabled": true,
+          "primary": true,
+          "width": 1920,
+          "height": 1080,
+          "refresh_rate": 60,
+          "position_x": 0,
+          "position_y": 0
+        },
+        "\\\\.\\DISPLAY2": { "enabled": false }
+      }
+    }
+  ]
+}
+```
+
+Restart ScreenShift after editing the config.
+
 ## Status
 
 Work in progress.
