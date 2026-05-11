@@ -61,7 +61,9 @@ class ScreenShiftApp:
             ))
         items += [
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem('List Monitors', lambda _: self._show_monitors()),
+            pystray.MenuItem('List Monitors', lambda _: threading.Thread(
+                target=self._show_monitors, daemon=True,
+            ).start()),
             pystray.MenuItem('Open Config',   lambda _: os.startfile(str(CONFIG_PATH))),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('Quit',          lambda _: self.icon.stop()),
