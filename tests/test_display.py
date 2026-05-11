@@ -1,5 +1,6 @@
 import ctypes
-from unittest.mock import MagicMock, call, patch
+import pytest
+from unittest.mock import MagicMock
 
 from src.display import (
     CDS_NORESET,
@@ -12,104 +13,106 @@ from src.display import (
     DM_POSITION,
     DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
     DISPLAY_DEVICE_PRIMARY_DEVICE,
-    DEVMODE,
     DisplayManager,
 )
 
 
+@pytest.fixture(autouse=True)
+def mock_windll(monkeypatch):
+    """Replace ctypes.windll with a MagicMock for every test in this module."""
+    m = MagicMock()
+    monkeypatch.setattr(ctypes, 'windll', m)
+    return m
+
+
 # ── list_displays ─────────────────────────────────────────────────────────────
 
-def test_list_displays_returns_empty_when_no_devices():
-    ctypes.windll.user32.EnumDisplayDevicesW.return_value = 0
+def test_list_displays_returns_empty_when_no_devices(mock_windll):
+    mock_windll.user32.EnumDisplayDevicesW.return_value = 0
 
-    result = DisplayManager.list_displays()
-
-    assert result == []
+    assert DisplayManager.list_displays() == []
 
 
-def test_list_displays_stops_at_first_failure():
-    ctypes.windll.user32.EnumDisplayDevicesW.side_effect = [1, 0]
+def test_list_displays_stops_after_first_failure(mock_windll):
+    # First call succeeds but DeviceName stays empty → skipped; second call stops loop
+    mock_windll.user32.EnumDisplayDevicesW.side_effect = [1, 0]
 
-    # Even if the first call "succeeds", the device name is empty (MagicMock default)
-    # so the device is skipped, then the second call returns 0 and the loop ends
-    result = DisplayManager.list_displays()
-
-    assert isinstance(result, list)
+    assert DisplayManager.list_displays() == []
 
 
-def test_list_displays_active_and_primary_flags():
+def test_list_displays_active_and_primary_flags(mock_windll):
     call_count = 0
 
     def fake_enum(name, index, dd_ptr, flags):
         nonlocal call_count
         if call_count > 0:
             return 0
-        from src.display import DISPLAY_DEVICE
-        dd = ctypes.cast(dd_ptr, ctypes.POINTER(DISPLAY_DEVICE)).contents
+        dd = dd_ptr._obj
         dd.DeviceName = '\\\\.\\DISPLAY1'
         dd.StateFlags = DISPLAY_DEVICE_ATTACHED_TO_DESKTOP | DISPLAY_DEVICE_PRIMARY_DEVICE
         call_count += 1
         return 1
 
-    ctypes.windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
+    mock_windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
 
     result = DisplayManager.list_displays()
 
     assert len(result) == 1
-    assert result[0]['active'] is True
+    assert result[0]['active']  is True
     assert result[0]['primary'] is True
 
 
-def test_list_displays_inactive_device():
+def test_list_displays_inactive_device(mock_windll):
     call_count = 0
 
     def fake_enum(name, index, dd_ptr, flags):
         nonlocal call_count
         if call_count > 0:
             return 0
-        from src.display import DISPLAY_DEVICE
-        dd = ctypes.cast(dd_ptr, ctypes.POINTER(DISPLAY_DEVICE)).contents
+        dd = dd_ptr._obj
         dd.DeviceName = '\\\\.\\DISPLAY2'
-        dd.StateFlags = 0  # not attached
+        dd.StateFlags = 0
         call_count += 1
         return 1
 
-    ctypes.windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
+    mock_windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
 
     result = DisplayManager.list_displays()
 
-    assert result[0]['active'] is False
+    assert result[0]['active']  is False
     assert result[0]['primary'] is False
 
 
 # ── enable_display ────────────────────────────────────────────────────────────
 
-def test_enable_display_calls_api():
-    ctypes.windll.user32.ChangeDisplaySettingsExW.return_value = DISP_CHANGE_SUCCESSFUL
+def test_enable_display_calls_api(mock_windll):
+    mock_windll.user32.ChangeDisplaySettingsExW.return_value = DISP_CHANGE_SUCCESSFUL
 
     result = DisplayManager.enable_display(
         '\\\\.\\DISPLAY1', width=1920, height=1080,
         refresh_rate=60, position_x=0, position_y=0,
     )
 
-    assert ctypes.windll.user32.ChangeDisplaySettingsExW.called
+    assert mock_windll.user32.ChangeDisplaySettingsExW.called
     assert result == DISP_CHANGE_SUCCESSFUL
 
 
-def test_enable_display_devmode_fields():
+def test_enable_display_devmode_fields(mock_windll):
     captured = {}
 
     def capture(device, dm_ptr, hwnd, flags, param):
-        dm = dm_ptr._obj  # ctypes byref object
-        captured['width']   = dm.dmPelsWidth
-        captured['height']  = dm.dmPelsHeight
-        captured['refresh'] = dm.dmDisplayFrequency
-        captured['x']       = dm.dmPositionX
-        captured['y']       = dm.dmPositionY
-        captured['fields']  = dm.dmFields
+        dm = dm_ptr._obj
+        captured.update({
+            'width':   dm.dmPelsWidth,
+            'height':  dm.dmPelsHeight,
+            'refresh': dm.dmDisplayFrequency,
+            'x':       dm.dmPositionX,
+            'y':       dm.dmPositionY,
+            'fields':  dm.dmFields,
+        })
         return DISP_CHANGE_SUCCESSFUL
 
-    ctypes.windll.user32.ChangeDisplaySettingsExW.side_effect = capture
+    mock_windll.user32.ChangeDisplaySettingsExW.side_effect = capture
 
     DisplayManager.enable_display(
         '\\\\.\\DISPLAY1', width=2560, height=1440,
@@ -126,7 +129,7 @@ def test_enable_display_devmode_fields():
 
 # ── disable_display ───────────────────────────────────────────────────────────
 
-def test_disable_display_sets_zero_resolution():
+def test_disable_display_sets_zero_resolution(mock_windll):
     captured = {}
 
     def capture(device, dm_ptr, hwnd, flags, param):
@@ -135,7 +138,7 @@ def test_disable_display_sets_zero_resolution():
         captured['height'] = dm.dmPelsHeight
         return DISP_CHANGE_SUCCESSFUL
 
-    ctypes.windll.user32.ChangeDisplaySettingsExW.side_effect = capture
+    mock_windll.user32.ChangeDisplaySettingsExW.side_effect = capture
 
     DisplayManager.disable_display('\\\\.\\DISPLAY2')
 
@@ -143,26 +146,26 @@ def test_disable_display_sets_zero_resolution():
     assert captured['height'] == 0
 
 
-def test_disable_display_uses_registry_flags():
-    captured_flags = {}
+def test_disable_display_uses_registry_flags(mock_windll):
+    captured = {}
 
     def capture(device, dm_ptr, hwnd, flags, param):
-        captured_flags['flags'] = flags
+        captured['flags'] = flags
         return DISP_CHANGE_SUCCESSFUL
 
-    ctypes.windll.user32.ChangeDisplaySettingsExW.side_effect = capture
+    mock_windll.user32.ChangeDisplaySettingsExW.side_effect = capture
 
     DisplayManager.disable_display('\\\\.\\DISPLAY2')
 
-    assert captured_flags['flags'] == CDS_UPDATEREGISTRY | CDS_NORESET
+    assert captured['flags'] == CDS_UPDATEREGISTRY | CDS_NORESET
 
 
 # ── apply_changes ─────────────────────────────────────────────────────────────
 
-def test_apply_changes_calls_api_with_nulls():
-    ctypes.windll.user32.ChangeDisplaySettingsExW.return_value = DISP_CHANGE_SUCCESSFUL
+def test_apply_changes_calls_api_with_nulls(mock_windll):
+    mock_windll.user32.ChangeDisplaySettingsExW.return_value = DISP_CHANGE_SUCCESSFUL
 
     result = DisplayManager.apply_changes()
 
-    ctypes.windll.user32.ChangeDisplaySettingsExW.assert_called_with(None, None, None, 0, None)
+    mock_windll.user32.ChangeDisplaySettingsExW.assert_called_with(None, None, None, 0, None)
     assert result == DISP_CHANGE_SUCCESSFUL
