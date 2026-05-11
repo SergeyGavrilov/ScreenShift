@@ -57,6 +57,7 @@ class ScreenShiftApp:
             self.icon.notify(msg, APP_NAME)
             cp = _switcher._current_profile
             self.icon.title = f"{APP_NAME} — {cp}" if cp else APP_NAME
+            self.icon.menu  = self._build_menu()   # rebuild so enabled/checked states refresh
 
     def _build_menu(self) -> pystray.Menu:
         items = []

@@ -18,11 +18,12 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from src.autostart import start_menu_shortcut
+from src.autostart import autostart_enable, start_menu_shortcut
 from src.display import DisplayManager
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
@@ -365,18 +366,17 @@ class SetupWizard:
         try:
             install_dir.mkdir(parents=True, exist_ok=True)
 
-            if frozen and Path(sys.executable) != exe_dst:
+            if frozen and Path(sys.executable).resolve() != exe_dst.resolve():
                 shutil.copy2(sys.executable, exe_dst)
-                start_menu_shortcut()
+
+            if frozen:
+                start_menu_shortcut(exe_path=str(exe_dst))
 
             with open(config_path, 'w', encoding='utf-8') as fp:
                 json.dump(self.build_config(), fp, indent=2, ensure_ascii=False)
 
             if frozen and self.autostart_var.get():
-                import winreg
-                key = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key, 0, winreg.KEY_SET_VALUE) as k:
-                    winreg.SetValueEx(k, 'ScreenShift', 0, winreg.REG_SZ, f'"{exe_dst}"')
+                autostart_enable(exe_path=str(exe_dst))
 
             if frozen:
                 subprocess.Popen([str(exe_dst)])
@@ -395,5 +395,84 @@ class SetupWizard:
         self.root.mainloop()
 
 
+# ── update helpers ────────────────────────────────────────────────────────────
+
+def _is_running() -> bool:
+    """Return True if ScreenShift.exe is currently running (Windows tasklist)."""
+    try:
+        out = subprocess.check_output(
+            ['tasklist', '/FI', 'IMAGENAME eq ScreenShift.exe', '/NH'],
+            stderr=subprocess.DEVNULL, text=True,
+        )
+        return 'ScreenShift.exe' in out
+    except Exception:
+        return False
+
+
+def _kill_running() -> None:
+    subprocess.run(
+        ['taskkill', '/F', '/IM', 'ScreenShift.exe'],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def _run_update(exe_dst: Path) -> None:
+    """Replace an existing installation without showing the full wizard."""
+    root = tk.Tk()
+    root.withdraw()
+    root.title('ScreenShift')
+
+    if not messagebox.askyesno(
+        'ScreenShift — Update',
+        f'ScreenShift is already installed at:\n{exe_dst.parent}\n\n'
+        'Update it to this version?',
+        parent=root,
+    ):
+        root.destroy()
+        return
+
+    if _is_running():
+        if messagebox.askyesno(
+            'ScreenShift — Update',
+            'ScreenShift is currently running.\n'
+            'Close it automatically and continue with the update?',
+            parent=root,
+        ):
+            _kill_running()
+            time.sleep(1.0)
+        else:
+            messagebox.showinfo(
+                'ScreenShift — Update',
+                'Please close ScreenShift and run the installer again.',
+                parent=root,
+            )
+            root.destroy()
+            return
+
+    try:
+        shutil.copy2(sys.executable, exe_dst)
+        start_menu_shortcut(exe_path=str(exe_dst))
+        autostart_enable(exe_path=str(exe_dst))
+        messagebox.showinfo(
+            'ScreenShift — Update',
+            'Update complete!\nScreenShift will start now.',
+            parent=root,
+        )
+        subprocess.Popen([str(exe_dst)])
+    except Exception as exc:
+        messagebox.showerror('ScreenShift — Update', f'Update failed:\n{exc}', parent=root)
+
+    root.destroy()
+    sys.exit(0)
+
+
+# ── entry point ───────────────────────────────────────────────────────────────
+
 def run_setup():
-    SetupWizard().run()
+    frozen    = getattr(sys, 'frozen', False)
+    exe_dst   = _DEFAULT_INSTALL / 'ScreenShift.exe'
+    # If a different copy is already installed → run update flow
+    if frozen and exe_dst.exists() and Path(sys.executable).resolve() != exe_dst.resolve():
+        _run_update(exe_dst)
+    else:
+        SetupWizard().run()
