@@ -14,6 +14,7 @@ DM_BITSPERPEL        = 0x00000004
 DM_PELSWIDTH         = 0x00080000
 DM_PELSHEIGHT        = 0x00100000
 DM_DISPLAYFREQUENCY  = 0x00400000
+ENUM_CURRENT_SETTINGS = -1
 
 # ── Structures ────────────────────────────────────────────────────────────────
 
@@ -118,3 +119,17 @@ class DisplayManager:
     @staticmethod
     def apply_changes() -> int:
         return ctypes.windll.user32.ChangeDisplaySettingsExW(None, None, None, 0, None)
+
+    @staticmethod
+    def get_current_settings(device_name: str) -> dict | None:
+        dm = DEVMODE()
+        dm.dmSize = ctypes.sizeof(DEVMODE)
+        if ctypes.windll.user32.EnumDisplaySettingsW(device_name, ENUM_CURRENT_SETTINGS, ctypes.byref(dm)):
+            return {
+                'width':        dm.dmPelsWidth,
+                'height':       dm.dmPelsHeight,
+                'refresh_rate': dm.dmDisplayFrequency,
+                'position_x':   dm.dmPositionX,
+                'position_y':   dm.dmPositionY,
+            }
+        return None
