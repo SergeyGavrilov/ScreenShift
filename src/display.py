@@ -4,6 +4,7 @@ import ctypes
 
 DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x00000001
 DISPLAY_DEVICE_PRIMARY_DEVICE      = 0x00000004
+DISPLAY_DEVICE_MIRRORING_DRIVER    = 0x00000008
 
 CDS_UPDATEREGISTRY    = 0x00000001
 CDS_NORESET           = 0x10000000
@@ -14,7 +15,8 @@ DM_BITSPERPEL        = 0x00000004
 DM_PELSWIDTH         = 0x00080000
 DM_PELSHEIGHT        = 0x00100000
 DM_DISPLAYFREQUENCY  = 0x00400000
-ENUM_CURRENT_SETTINGS = -1
+ENUM_CURRENT_SETTINGS  = -1
+ENUM_REGISTRY_SETTINGS = -2
 
 # ── Structures ────────────────────────────────────────────────────────────────
 
@@ -76,14 +78,30 @@ class DisplayManager:
             dd.cb = ctypes.sizeof(DISPLAY_DEVICE)
             if not ctypes.windll.user32.EnumDisplayDevicesW(None, i, ctypes.byref(dd), 0):
                 break
-            if dd.DeviceName:
-                result.append({
-                    'name':        dd.DeviceName,
-                    'description': dd.DeviceString,
-                    'active':      bool(dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP),
-                    'primary':     bool(dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE),
-                })
             i += 1
+            if not dd.DeviceName:
+                continue
+            # Skip virtual mirror drivers (RDP, Hyper-V video, etc.)
+            if dd.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER:
+                continue
+            is_active  = bool(dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP)
+            is_primary = bool(dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+            # For inactive adapters, skip those with no registry settings or
+            # zero resolution — these are ghost/placeholder entries.
+            if not is_active:
+                dm = DEVMODE()
+                dm.dmSize = ctypes.sizeof(DEVMODE)
+                has_reg = ctypes.windll.user32.EnumDisplaySettingsW(
+                    dd.DeviceName, ENUM_REGISTRY_SETTINGS, ctypes.byref(dm),
+                )
+                if not has_reg or dm.dmPelsWidth == 0:
+                    continue
+            result.append({
+                'name':        dd.DeviceName,
+                'description': dd.DeviceString,
+                'active':      is_active,
+                'primary':     is_primary,
+            })
         return result
 
     @staticmethod

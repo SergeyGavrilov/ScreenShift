@@ -12,6 +12,7 @@ from src.display import (
     DM_PELSWIDTH,
     DM_POSITION,
     DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
+    DISPLAY_DEVICE_MIRRORING_DRIVER,
     DISPLAY_DEVICE_PRIMARY_DEVICE,
     DisplayManager,
 )
@@ -62,7 +63,8 @@ def test_list_displays_active_and_primary_flags(mock_windll):
     assert result[0]['primary'] is True
 
 
-def test_list_displays_inactive_device(mock_windll):
+def test_list_displays_inactive_with_registry_settings(mock_windll):
+    # Inactive device that has real registry settings → should be included
     call_count = 0
 
     def fake_enum(name, index, dd_ptr, flags):
@@ -71,16 +73,66 @@ def test_list_displays_inactive_device(mock_windll):
             return 0
         dd = dd_ptr._obj
         dd.DeviceName = '\\\\.\\DISPLAY2'
+        dd.StateFlags = 0  # inactive, not mirroring
+        call_count += 1
+        return 1
+
+    def fake_settings(device, mode, dm_ptr, *a):
+        dm = dm_ptr._obj
+        dm.dmPelsWidth  = 2560
+        dm.dmPelsHeight = 1440
+        return 1  # has registry entry
+
+    mock_windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
+    mock_windll.user32.EnumDisplaySettingsW.side_effect = fake_settings
+
+    result = DisplayManager.list_displays()
+
+    assert len(result) == 1
+    assert result[0]['active']  is False
+    assert result[0]['primary'] is False
+
+
+def test_list_displays_skips_ghost_inactive_device(mock_windll):
+    # Inactive device with zero resolution in registry → ghost adapter, skip it
+    call_count = 0
+
+    def fake_enum(name, index, dd_ptr, flags):
+        nonlocal call_count
+        if call_count > 0:
+            return 0
+        dd = dd_ptr._obj
+        dd.DeviceName = '\\\\.\\DISPLAY5'
         dd.StateFlags = 0
+        call_count += 1
+        return 1
+
+    def fake_settings(device, mode, dm_ptr, *a):
+        # dmPelsWidth stays 0 (ctypes default)
+        return 1
+
+    mock_windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
+    mock_windll.user32.EnumDisplaySettingsW.side_effect = fake_settings
+
+    assert DisplayManager.list_displays() == []
+
+
+def test_list_displays_skips_mirror_driver(mock_windll):
+    call_count = 0
+
+    def fake_enum(name, index, dd_ptr, flags):
+        nonlocal call_count
+        if call_count > 0:
+            return 0
+        dd = dd_ptr._obj
+        dd.DeviceName = '\\\\.\\DISPLAY3'
+        dd.StateFlags = DISPLAY_DEVICE_MIRRORING_DRIVER
         call_count += 1
         return 1
 
     mock_windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
 
-    result = DisplayManager.list_displays()
-
-    assert result[0]['active']  is False
-    assert result[0]['primary'] is False
+    assert DisplayManager.list_displays() == []
 
 
 # ── enable_display ────────────────────────────────────────────────────────────
