@@ -148,30 +148,18 @@ class SetupWizard:
     # ── page 1: detected monitors ─────────────────────────────────────────────
 
     def _build_monitors_page(self) -> tk.Frame:
-        outer = tk.Frame(self.content, bg=_C['base'])
-        self._lbl(outer, 'Connected displays', 13, bold=True).pack(anchor='w', padx=25, pady=(20, 8))
+        f = tk.Frame(self.content, bg=_C['base'])
+        self._lbl(f, 'Connected displays', 13, bold=True).pack(anchor='w', padx=25, pady=(20, 8))
 
-        canvas    = tk.Canvas(outer, bg=_C['mantle'], highlightthickness=0)
-        scrollbar = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
-        inner     = tk.Frame(canvas, bg=_C['mantle'])
-
-        inner.bind('<Configure>',
-                   lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
-        canvas.create_window((0, 0), window=inner, anchor='nw')
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side='left', fill='both', expand=True, padx=(25, 0))
-        scrollbar.pack(side='right', fill='y', padx=(0, 25))
-
-        # mouse wheel scroll
-        canvas.bind('<MouseWheel>',
-                    lambda e: canvas.yview_scroll(-1 * (e.delta // 120), 'units'))
+        box = tk.Frame(f, bg=_C['mantle'])
+        box.pack(fill='x', padx=25)
 
         if not self.monitors:
-            self._lbl(inner, 'No displays found.', 10, color=_C['muted']).pack(padx=12, pady=8)
+            self._lbl(box, 'No displays found.', 10, color=_C['muted']).pack(padx=12, pady=8)
 
         for m in self.monitors:
-            row = tk.Frame(inner, bg=_C['mantle'])
-            row.pack(fill='x', padx=12, pady=5)
+            row = tk.Frame(box, bg=_C['mantle'])
+            row.pack(fill='x', padx=12, pady=6)
             dot_fg = _C['green'] if m['active'] else _C['muted']
             self._lbl(row, '●', 10, color=dot_fg).pack(side='left')
             dev  = m['name']
@@ -183,9 +171,9 @@ class SetupWizard:
             tag = '  [primary]' if m['primary'] else ('  [active]' if m['active'] else '  [off]')
             self._lbl(row, f' {dev}  —  {desc}{res}{tag}', 9, color=_C['text']).pack(side='left')
 
-        self._lbl(outer, 'Use these names when editing config.json manually.',
-                  9, color=_C['muted']).pack(anchor='w', padx=25, pady=(6, 0))
-        return outer
+        self._lbl(f, 'Use these names when editing config.json manually.',
+                  9, color=_C['muted']).pack(anchor='w', padx=25, pady=(10, 0))
+        return f
 
     # ── page 2: profiles ──────────────────────────────────────────────────────
 
