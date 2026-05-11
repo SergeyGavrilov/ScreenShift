@@ -22,6 +22,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from src.autostart import start_menu_shortcut
 from src.display import DisplayManager
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
@@ -366,6 +367,7 @@ class SetupWizard:
 
             if frozen and Path(sys.executable) != exe_dst:
                 shutil.copy2(sys.executable, exe_dst)
+                start_menu_shortcut()
 
             with open(config_path, 'w', encoding='utf-8') as fp:
                 json.dump(self.build_config(), fp, indent=2, ensure_ascii=False)

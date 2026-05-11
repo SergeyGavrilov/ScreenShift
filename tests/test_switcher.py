@@ -6,6 +6,17 @@ import src.switcher as switcher_module
 from src.display import DISP_CHANGE_SUCCESSFUL
 from src.switcher import switch_to, restore_previous, _lock
 
+# reset module-level state before every test
+import pytest
+
+@pytest.fixture(autouse=True)
+def _reset_switcher_state():
+    switcher_module._previous_state  = None
+    switcher_module._current_profile = None
+    yield
+    switcher_module._previous_state  = None
+    switcher_module._current_profile = None
+
 
 _PROFILE = {
     'name': 'Work',
@@ -174,7 +185,6 @@ def _display(name, active, **kw):
 
 
 def test_previous_state_saved_on_success():
-    switcher_module._previous_state = None
     with patch('src.switcher.DisplayManager') as MockDM, \
          patch('src.switcher.WindowMigrator'), \
          patch('src.switcher.time.sleep'):
@@ -189,7 +199,6 @@ def test_previous_state_saved_on_success():
 
 
 def test_previous_state_not_saved_on_failure():
-    switcher_module._previous_state = None
     with patch('src.switcher.DisplayManager') as MockDM, \
          patch('src.switcher.WindowMigrator'), \
          patch('src.switcher.time.sleep'):
@@ -201,14 +210,13 @@ def test_previous_state_not_saved_on_failure():
 
 
 def test_restore_previous_notifies_nothing_to_restore():
-    switcher_module._previous_state = None
     notify = MagicMock()
     restore_previous(notify=notify)
     notify.assert_called_once_with('Nothing to restore')
 
 
 def test_restore_previous_calls_switch_to():
-    switcher_module._previous_state = [
+    switcher_module._previous_state = [   # set directly — fixture resets after test
         {
             'device': '\\\\.\\DISPLAY1', 'enabled': True,
             'width': 1920, 'height': 1080, 'refresh_rate': 60,
@@ -226,7 +234,7 @@ def test_restore_previous_calls_switch_to():
 
 
 def test_restore_re_enables_previously_active_monitors():
-    switcher_module._previous_state = [
+    switcher_module._previous_state = [   # set directly — fixture resets after test
         {
             'device': '\\\\.\\DISPLAY1', 'enabled': True,
             'width': 2560, 'height': 1440, 'refresh_rate': 144,
@@ -243,3 +251,43 @@ def test_restore_re_enables_previously_active_monitors():
         '\\\\.\\DISPLAY1',
         width=2560, height=1440, refresh_rate=144, position_x=0, position_y=0,
     )
+
+
+# ── already-active guard ──────────────────────────────────────────────────────
+
+def test_already_active_profile_is_skipped():
+    switcher_module._current_profile = 'Work'
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        switch_to(_PROFILE)
+        MockDM.apply_changes.assert_not_called()
+
+
+def test_already_active_notifies_user():
+    switcher_module._current_profile = 'Work'
+    notify = MagicMock()
+    switch_to(_PROFILE, notify=notify)
+    notify.assert_called_once()
+    assert 'already' in notify.call_args[0][0].lower()
+
+
+def test_current_profile_set_on_success():
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        MockDM.list_displays.return_value = []
+        _ok(MockDM)
+        switch_to(_PROFILE)
+    assert switcher_module._current_profile == 'Work'
+
+
+def test_current_profile_not_set_on_failure():
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        MockDM.list_displays.return_value = []
+        _ok(MockDM)
+        MockDM.apply_changes.return_value = -1
+        switch_to(_PROFILE)
+    assert switcher_module._current_profile is None

@@ -1,3 +1,4 @@
+import os
 import sys
 import winreg
 from pathlib import Path
@@ -23,6 +24,26 @@ def autostart_disable() -> None:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
             winreg.DeleteValue(k, APP_NAME)
     except FileNotFoundError:
+        pass
+
+
+def start_menu_shortcut() -> None:
+    """Create a Start Menu shortcut pointing to the installed exe."""
+    if not getattr(sys, 'frozen', False):
+        return
+    try:
+        import win32com.client
+        shell    = win32com.client.Dispatch('WScript.Shell')
+        programs = (
+            Path(os.environ.get('APPDATA', ''))
+            / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs'
+        )
+        lnk = shell.CreateShortcut(str(programs / f'{APP_NAME}.lnk'))
+        lnk.TargetPath       = sys.executable
+        lnk.WorkingDirectory = str(Path(sys.executable).parent)
+        lnk.Description      = f'Switch monitor profiles instantly'
+        lnk.save()
+    except Exception:
         pass
 
 

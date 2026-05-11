@@ -5,8 +5,9 @@ from typing import Optional
 from src.display import DisplayManager, DISP_CHANGE_SUCCESSFUL
 from src.migrator import WindowMigrator
 
-_lock           = threading.Lock()
+_lock            = threading.Lock()
 _previous_state: Optional[list] = None   # snapshot taken before the last successful switch
+_current_profile: Optional[str] = None   # name of the last successfully applied profile
 
 
 # ── snapshot helpers ──────────────────────────────────────────────────────────
@@ -44,7 +45,11 @@ def _snapshot_to_profile(state: list[dict], name: str = 'Previous') -> dict:
 # ── public API ────────────────────────────────────────────────────────────────
 
 def switch_to(profile: dict, notify=None) -> None:
-    global _previous_state
+    global _previous_state, _current_profile
+    if _current_profile is not None and _current_profile == profile.get('name'):
+        if notify:
+            notify(f"Already active: {profile['name']}")
+        return
     if not _lock.acquire(blocking=False):
         return
     try:
@@ -78,7 +83,8 @@ def switch_to(profile: dict, notify=None) -> None:
         result = DisplayManager.apply_changes()
 
         if result == DISP_CHANGE_SUCCESSFUL:
-            _previous_state = snapshot   # commit snapshot only on success
+            _previous_state  = snapshot           # commit snapshot only on success
+            _current_profile = profile.get('name')
             time.sleep(1.5)
             WindowMigrator.migrate_all()
             if notify:

@@ -55,6 +55,8 @@ class ScreenShiftApp:
     def _notify(self, msg: str) -> None:
         if self.icon:
             self.icon.notify(msg, APP_NAME)
+            cp = _switcher._current_profile
+            self.icon.title = f"{APP_NAME} — {cp}" if cp else APP_NAME
 
     def _build_menu(self) -> pystray.Menu:
         items = []
@@ -66,6 +68,7 @@ class ScreenShiftApp:
                 lambda _, prof=p: threading.Thread(
                     target=switch_to, args=(prof, self._notify), daemon=True,
                 ).start(),
+                checked=lambda _, prof=p: _switcher._current_profile == prof.get('name'),
             ))
         restore_hk    = self.cfg.restore_hotkey
         restore_label = f'Restore previous  [{restore_hk}]' if restore_hk else 'Restore previous'
