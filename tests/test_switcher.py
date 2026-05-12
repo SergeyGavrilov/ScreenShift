@@ -291,3 +291,27 @@ def test_current_profile_not_set_on_failure():
         MockDM.apply_changes.return_value = -1
         switch_to(_PROFILE)
     assert switcher_module._current_profile is None
+
+
+def test_restore_previous_works_repeatedly():
+    """Restore must not be blocked by the already-active guard on repeated presses."""
+    switcher_module._previous_state = [
+        {
+            'device': '\\\\.\\DISPLAY1', 'enabled': True,
+            'width': 1920, 'height': 1080, 'refresh_rate': 60,
+            'position_x': 0, 'position_y': 0,
+        },
+    ]
+    switcher_module._current_profile = 'Previous'   # simulate state after first restore
+
+    calls = []
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        MockDM.list_displays.return_value = []
+        _ok(MockDM)
+        restore_previous(notify=lambda m: calls.append(m))
+
+    # should have switched, not returned "Already active"
+    assert MockDM.apply_changes.called
+    assert not any('already' in m.lower() for m in calls)

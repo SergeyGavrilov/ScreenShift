@@ -44,9 +44,11 @@ def _snapshot_to_profile(state: list[dict], name: str = 'Previous') -> dict:
 
 # ── public API ────────────────────────────────────────────────────────────────
 
-def switch_to(profile: dict, notify=None) -> None:
+def switch_to(profile: dict, notify=None, _bypass_guard: bool = False) -> None:
     global _previous_state, _current_profile
-    if _current_profile is not None and _current_profile == profile.get('name'):
+    if (not _bypass_guard
+            and _current_profile is not None
+            and _current_profile == profile.get('name')):
         if notify:
             notify(f"Already active: {profile['name']}")
         return
@@ -83,10 +85,13 @@ def switch_to(profile: dict, notify=None) -> None:
         result = DisplayManager.apply_changes()
 
         if result == DISP_CHANGE_SUCCESSFUL:
-            _previous_state  = snapshot           # commit snapshot only on success
+            _previous_state  = snapshot
             _current_profile = profile.get('name')
             time.sleep(1.5)
-            WindowMigrator.migrate_all()
+            try:
+                WindowMigrator.migrate_all()
+            except Exception:
+                pass   # window migration is best-effort
             if notify:
                 notify(f"Switched to: {profile['name']}")
         else:
@@ -103,4 +108,5 @@ def restore_previous(notify=None) -> None:
             notify('Nothing to restore')
         return
     profile = _snapshot_to_profile(_previous_state)
-    switch_to(profile, notify=notify)
+    # bypass the already-active guard — the state behind 'Previous' changes each time
+    switch_to(profile, notify=notify, _bypass_guard=True)

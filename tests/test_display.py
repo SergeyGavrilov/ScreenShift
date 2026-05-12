@@ -151,7 +151,7 @@ def test_enable_display_calls_api(mock_windll):
 
 
 def test_enable_display_uses_config_when_no_registry(mock_windll):
-    # EnumDisplaySettingsW returns 0 → fall back to config values
+    # Both registry and current settings return 0 → fall back to config values
     mock_windll.user32.EnumDisplaySettingsW.return_value = 0
     captured = {}
 
@@ -215,6 +215,46 @@ def test_enable_display_uses_registry_when_available(mock_windll):
     assert captured['height'] == 1440
     assert captured['x']      == 5
     assert captured['y']      == 10
+
+
+def test_enable_display_falls_back_to_current_when_registry_zero(mock_windll):
+    # Registry entry exists but width=0 (display was disabled by us) → use current live settings.
+    # This covers the post-reboot case where Windows auto-restores the display.
+    call_count = [0]
+
+    def fake_settings(device, mode, dm_ptr, *a):
+        call_count[0] += 1
+        dm = dm_ptr._obj
+        if call_count[0] == 1:              # ENUM_REGISTRY_SETTINGS → disabled (zero)
+            dm.dmPelsWidth  = 0
+            dm.dmPelsHeight = 0
+        else:                               # ENUM_CURRENT_SETTINGS → Windows-restored mode
+            dm.dmPelsWidth        = 2560
+            dm.dmPelsHeight       = 1440
+            dm.dmDisplayFrequency = 144
+            dm.dmBitsPerPel       = 32
+        return 1
+
+    mock_windll.user32.EnumDisplaySettingsW.side_effect = fake_settings
+    captured = {}
+
+    def capture_change(device, dm_ptr, hwnd, flags, param):
+        dm = dm_ptr._obj
+        captured['width']   = dm.dmPelsWidth
+        captured['height']  = dm.dmPelsHeight
+        captured['refresh'] = dm.dmDisplayFrequency
+        return DISP_CHANGE_SUCCESSFUL
+
+    mock_windll.user32.ChangeDisplaySettingsExW.side_effect = capture_change
+
+    DisplayManager.enable_display(
+        '\\\\.\\DISPLAY1', width=1920, height=1080,   # config values — should be ignored
+        refresh_rate=60, position_x=0, position_y=0,
+    )
+
+    assert captured['width']   == 2560   # from current settings, not config
+    assert captured['height']  == 1440
+    assert captured['refresh'] == 144
 
 
 # ── disable_display ───────────────────────────────────────────────────────────

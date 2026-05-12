@@ -110,11 +110,10 @@ class DisplayManager:
                        bpp: int = 32) -> int:
         dm = DEVMODE()
         dm.dmSize = ctypes.sizeof(DEVMODE)
-        # Prefer the monitor's own registry-stored settings over config values.
-        # After a previous switch the registry already holds the correct mode;
-        # sending hardcoded values can fail if they don't exactly match a
-        # supported mode (e.g. 60 vs 59.94 Hz), causing apply_changes() to
-        # silently succeed with nothing actually staged.
+
+        # Priority 1: registry-stored settings (valid after a previous enable).
+        # disable_display() writes width=0 to registry, so zero means the
+        # display was last disabled by us — fall through to the next option.
         has_reg = ctypes.windll.user32.EnumDisplaySettingsW(
             device, ENUM_REGISTRY_SETTINGS, ctypes.byref(dm),
         )
@@ -123,13 +122,31 @@ class DisplayManager:
             dm.dmPositionY  = position_y
             dm.dmFields    |= DM_POSITION
         else:
-            dm.dmFields           = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION | DM_DISPLAYFREQUENCY | DM_BITSPERPEL
-            dm.dmPelsWidth        = width
-            dm.dmPelsHeight       = height
-            dm.dmPositionX        = position_x
-            dm.dmPositionY        = position_y
-            dm.dmDisplayFrequency = refresh_rate
-            dm.dmBitsPerPel       = bpp
+            # Priority 2: live current settings — Windows often auto-restores
+            # disabled displays after reboot, giving us the correct native mode.
+            cur = DEVMODE()
+            cur.dmSize = ctypes.sizeof(DEVMODE)
+            has_cur = ctypes.windll.user32.EnumDisplaySettingsW(
+                device, ENUM_CURRENT_SETTINGS, ctypes.byref(cur),
+            )
+            if has_cur and cur.dmPelsWidth > 0:
+                dm.dmFields           = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION | DM_DISPLAYFREQUENCY | DM_BITSPERPEL
+                dm.dmPelsWidth        = cur.dmPelsWidth
+                dm.dmPelsHeight       = cur.dmPelsHeight
+                dm.dmDisplayFrequency = cur.dmDisplayFrequency
+                dm.dmBitsPerPel       = cur.dmBitsPerPel if cur.dmBitsPerPel else bpp
+                dm.dmPositionX        = position_x
+                dm.dmPositionY        = position_y
+            else:
+                # Priority 3: config values as last resort.
+                dm.dmFields           = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION | DM_DISPLAYFREQUENCY | DM_BITSPERPEL
+                dm.dmPelsWidth        = width
+                dm.dmPelsHeight       = height
+                dm.dmPositionX        = position_x
+                dm.dmPositionY        = position_y
+                dm.dmDisplayFrequency = refresh_rate
+                dm.dmBitsPerPel       = bpp
+
         return ctypes.windll.user32.ChangeDisplaySettingsExW(
             device, ctypes.byref(dm), None, CDS_UPDATEREGISTRY | CDS_NORESET, None,
         )
