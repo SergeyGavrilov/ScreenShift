@@ -333,6 +333,57 @@ def test_list_all_adapters_skips_mirror_driver(mock_windll):
     assert DisplayManager.list_all_adapters() == []
 
 
+# ── get_monitor_id / find_adapter_by_monitor_id ───────────────────────────────
+
+def test_get_monitor_id_returns_device_id(mock_windll):
+    def fake_enum(name, index, dd_ptr, flags):
+        dd = dd_ptr._obj
+        dd.DeviceID = 'MONITOR\\DEL4062\\{4d36e96e}\\0001'
+        return 1
+
+    mock_windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
+    result = DisplayManager.get_monitor_id('\\\\.\\DISPLAY1')
+    assert result == 'MONITOR\\DEL4062\\{4d36e96e}\\0001'
+
+
+def test_get_monitor_id_returns_none_when_no_monitor(mock_windll):
+    mock_windll.user32.EnumDisplayDevicesW.return_value = 0
+    assert DisplayManager.get_monitor_id('\\\\.\\DISPLAY1') is None
+
+
+def test_find_adapter_by_monitor_id_returns_correct_adapter(mock_windll):
+    target_id = 'MONITOR\\DEL4062\\{guid}\\0001'
+    other_id  = 'MONITOR\\SAM0F4E\\{guid}\\0001'
+    calls = [0]
+
+    def fake_enum(name, index, dd_ptr, flags):
+        dd = dd_ptr._obj
+        if name is None:
+            # adapter enumeration: return two adapters then stop
+            if index == 0:
+                dd.DeviceName = '\\\\.\\DISPLAY1'
+                dd.StateFlags = 0
+                return 1
+            elif index == 1:
+                dd.DeviceName = '\\\\.\\DISPLAY2'
+                dd.StateFlags = 0
+                return 1
+            return 0
+        else:
+            # monitor enumeration: return different IDs per adapter
+            dd.DeviceID = other_id if name == '\\\\.\\DISPLAY1' else target_id
+            return 1
+
+    mock_windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
+    result = DisplayManager.find_adapter_by_monitor_id(target_id)
+    assert result == '\\\\.\\DISPLAY2'
+
+
+def test_find_adapter_by_monitor_id_returns_none_when_not_found(mock_windll):
+    mock_windll.user32.EnumDisplayDevicesW.return_value = 0
+    assert DisplayManager.find_adapter_by_monitor_id('MONITOR\\MISSING\\x') is None
+
+
 # ── apply_changes ─────────────────────────────────────────────────────────────
 
 def test_apply_changes_calls_api_with_nulls(mock_windll):

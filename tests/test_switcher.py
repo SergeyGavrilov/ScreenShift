@@ -403,8 +403,8 @@ _PROFILES = [
 def test_detect_active_profile_matches_correctly():
     with patch('src.switcher.DisplayManager') as MockDM:
         MockDM.list_displays.return_value = [
-            {'name': '\\\\.\\DISPLAY1', 'active': True},
-            {'name': '\\\\.\\DISPLAY2', 'active': False},
+            {'name': '\\\\.\\DISPLAY1', 'active': True,  'monitor_id': None},
+            {'name': '\\\\.\\DISPLAY2', 'active': False, 'monitor_id': None},
         ]
         assert detect_active_profile(_PROFILES) == 'Work'
 
@@ -412,7 +412,57 @@ def test_detect_active_profile_matches_correctly():
 def test_detect_active_profile_returns_none_when_no_match():
     with patch('src.switcher.DisplayManager') as MockDM:
         MockDM.list_displays.return_value = [
-            {'name': '\\\\.\\DISPLAY1', 'active': True},
-            {'name': '\\\\.\\DISPLAY2', 'active': True},
+            {'name': '\\\\.\\DISPLAY1', 'active': True,  'monitor_id': None},
+            {'name': '\\\\.\\DISPLAY2', 'active': True,  'monitor_id': None},
         ]
         assert detect_active_profile(_PROFILES) is None
+
+
+def test_detect_active_profile_matches_by_monitor_id_after_renumber():
+    """After Windows renumbers adapters, detection must fall back to hardware IDs."""
+    profiles_with_ids = [
+        {
+            'name': 'Work',
+            'monitors': {
+                '\\\\.\\DISPLAY1': {'enabled': True,  'monitor_id': 'MONITOR\\DEL001'},
+                '\\\\.\\DISPLAY2': {'enabled': False, 'monitor_id': 'MONITOR\\SAM002'},
+            },
+        },
+    ]
+    with patch('src.switcher.DisplayManager') as MockDM:
+        # After reboot DISPLAY1 ↔ DISPLAY2 swapped, but monitor_ids are stable
+        MockDM.list_displays.return_value = [
+            {'name': '\\\\.\\DISPLAY2', 'active': True,  'monitor_id': 'MONITOR\\DEL001'},
+            {'name': '\\\\.\\DISPLAY1', 'active': False, 'monitor_id': 'MONITOR\\SAM002'},
+        ]
+        assert detect_active_profile(profiles_with_ids) == 'Work'
+
+
+def test_switch_remaps_adapter_after_renumber():
+    """switch_to must use find_adapter_by_monitor_id to locate the physical monitor
+    even when Windows has assigned it a different DISPLAY number after reboot."""
+    profile_with_id = {
+        'name': 'Work',
+        'monitors': {
+            '\\\\.\\DISPLAY1': {   # stored name — now wrong after reboot
+                'enabled': True, 'width': 1920, 'height': 1080,
+                'refresh_rate': 60, 'position_x': 0, 'position_y': 0,
+                'monitor_id': 'MONITOR\\DEL001',
+            },
+            '\\\\.\\DISPLAY2': {'enabled': False},
+        },
+    }
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        MockDM.list_displays.return_value = []
+        # Monitor is now on DISPLAY2 after renumber
+        MockDM.find_adapter_by_monitor_id.return_value = '\\\\.\\DISPLAY2'
+        _ok(MockDM)
+        switch_to(profile_with_id)
+
+    # Must enable DISPLAY2 (remapped), not DISPLAY1 (stored)
+    MockDM.enable_display.assert_called_once_with(
+        '\\\\.\\DISPLAY2',
+        width=1920, height=1080, refresh_rate=60, position_x=0, position_y=0,
+    )

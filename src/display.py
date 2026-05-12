@@ -71,6 +71,43 @@ class DISPLAY_DEVICE(ctypes.Structure):
 class DisplayManager:
 
     @staticmethod
+    def get_monitor_id(adapter_name: str) -> str | None:
+        """Return the hardware DeviceID of the monitor attached to adapter_name.
+
+        The DeviceID (e.g. 'MONITOR\\DEL4062\\{...}\\0002') is derived from
+        the monitor's EDID and stays constant across reboots even if Windows
+        renumbers the adapter as DISPLAY1 ↔ DISPLAY2.  Returns None if no
+        monitor is detected on this adapter (display is off or virtual).
+        """
+        dd = DISPLAY_DEVICE()
+        dd.cb = ctypes.sizeof(DISPLAY_DEVICE)
+        if ctypes.windll.user32.EnumDisplayDevicesW(adapter_name, 0, ctypes.byref(dd), 0):
+            dev_id = dd.DeviceID.strip()
+            return dev_id if dev_id else None
+        return None
+
+    @staticmethod
+    def find_adapter_by_monitor_id(monitor_id: str) -> str | None:
+        r"""Return the current \\.\DISPLAYx that has the given monitor hardware ID.
+
+        Scans all non-mirror adapters (active and inactive) so it works even
+        when Windows has renumbered adapters after a reboot.
+        """
+        i = 0
+        while True:
+            dd = DISPLAY_DEVICE()
+            dd.cb = ctypes.sizeof(DISPLAY_DEVICE)
+            if not ctypes.windll.user32.EnumDisplayDevicesW(None, i, ctypes.byref(dd), 0):
+                break
+            i += 1
+            if not dd.DeviceName or (dd.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER):
+                continue
+            mid = DisplayManager.get_monitor_id(dd.DeviceName)
+            if mid and mid == monitor_id:
+                return dd.DeviceName
+        return None
+
+    @staticmethod
     def list_all_adapters() -> list[str]:
         """Names of all real (non-mirror) adapters — no ghost filtering.
         Used by the snapshot to include adapters we previously disabled
@@ -117,6 +154,7 @@ class DisplayManager:
                 'description': dd.DeviceString,
                 'active':      is_active,
                 'primary':     is_primary,
+                'monitor_id':  DisplayManager.get_monitor_id(dd.DeviceName),
             })
         return result
 

@@ -321,15 +321,18 @@ class SetupWizard:
                         'width': 1920, 'height': 1080,
                         'refresh_rate': 60,
                     }
-                    monitors[m['name']] = {
-                        'enabled':    True,
-                        'primary':    not primary_set,
-                        'width':      base['width'],
-                        'height':     base['height'],
+                    entry = {
+                        'enabled':      True,
+                        'primary':      not primary_set,
+                        'width':        base['width'],
+                        'height':       base['height'],
                         'refresh_rate': base['refresh_rate'],
-                        'position_x': 0,   # always reset to origin for clean single-display switch
-                        'position_y': 0,
+                        'position_x':   0,
+                        'position_y':   0,
                     }
+                    if m.get('monitor_id'):
+                        entry['monitor_id'] = m['monitor_id']
+                    monitors[m['name']] = entry
                     primary_set = True
                 else:
                     monitors[m['name']] = {'enabled': False}

@@ -81,6 +81,20 @@ def switch_to(profile: dict, notify=None, _bypass_guard: bool = False) -> None:
 
         failed = []
         for device, cfg in ordered:
+            # Resolve current adapter name via monitor hardware ID so the switch
+            # still targets the right physical monitor even if Windows renumbered
+            # DISPLAY1 ↔ DISPLAY2 after a reboot.
+            monitor_id = cfg.get('monitor_id')
+            if monitor_id:
+                current = DisplayManager.find_adapter_by_monitor_id(monitor_id)
+                if current and current != device:
+                    _log.info(
+                        "Remapped %s → %s (Windows renumbered after reboot)",
+                        device.replace('\\\\.\\', ''),
+                        current.replace('\\\\.\\', ''),
+                    )
+                    device = current
+
             if cfg.get('enabled'):
                 ret = DisplayManager.enable_display(
                     device,
@@ -132,17 +146,27 @@ def switch_to(profile: dict, notify=None, _bypass_guard: bool = False) -> None:
 
 def detect_active_profile(profiles: list[dict]) -> Optional[str]:
     """Return the name of the profile whose enabled-monitor set matches current state.
-    Used on startup so the menu checkmark and already-active guard are correct."""
+
+    Matches first by adapter name (exact), then by monitor hardware ID so the
+    correct profile is detected even after Windows renumbers adapters on reboot.
+    """
     try:
-        current_active = {d['name'] for d in DisplayManager.list_displays() if d['active']}
+        active_displays     = [d for d in DisplayManager.list_displays() if d['active']]
+        current_active_names = {d['name'] for d in active_displays}
+        current_active_ids   = {d['monitor_id'] for d in active_displays
+                                 if d.get('monitor_id')}
     except Exception:
         return None
     for profile in profiles:
         monitors = profile.get('monitors', {})
         if not monitors:
             continue
-        profile_active = {dev for dev, cfg in monitors.items() if cfg.get('enabled')}
-        if profile_active == current_active:
+        profile_active_names = {dev for dev, cfg in monitors.items() if cfg.get('enabled')}
+        profile_active_ids   = {cfg['monitor_id'] for cfg in monitors.values()
+                                 if cfg.get('enabled') and cfg.get('monitor_id')}
+        if profile_active_names == current_active_names:
+            return profile['name']
+        if profile_active_ids and current_active_ids and profile_active_ids == current_active_ids:
             return profile['name']
     return None
 
