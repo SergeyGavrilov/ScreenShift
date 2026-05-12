@@ -15,8 +15,15 @@ _current_profile: Optional[str] = None   # name of the last successfully applied
 
 # ── snapshot helpers ──────────────────────────────────────────────────────────
 
-def _snapshot() -> list[dict]:
-    """Capture the current active/inactive state of all known displays."""
+def _snapshot(profile_devices: set[str] | None = None) -> list[dict]:
+    """Capture the current active/inactive state of known displays.
+
+    profile_devices — device names from the profile about to be applied.
+    Devices in this set that are currently inactive (registry width=0, so
+    skipped by list_displays) are added as disabled, ensuring restore can
+    explicitly turn them back off.  This avoids pulling in the dozens of
+    virtual/ghost adapters that list_all_adapters() would return.
+    """
     result = []
     seen: set[str] = set()
     for d in DisplayManager.list_displays():
@@ -27,9 +34,7 @@ def _snapshot() -> list[dict]:
             if settings:
                 entry.update(settings)
         result.append(entry)
-    # list_displays() skips adapters that were disabled by us (registry width=0).
-    # Include them explicitly as disabled so restore will turn them back off.
-    for name in DisplayManager.list_all_adapters():
+    for name in (profile_devices or set()):
         if name not in seen:
             result.append({'device': name, 'enabled': False})
     return result
@@ -70,9 +75,8 @@ def switch_to(profile: dict, notify=None, _bypass_guard: bool = False) -> None:
         return
     try:
         _log.info("Switching to profile '%s'", name)
-        snapshot = _snapshot()
-
         monitors_cfg = profile.get('monitors', {})
+        snapshot = _snapshot(profile_devices=set(monitors_cfg.keys()))
         ordered = sorted(monitors_cfg.items(), key=lambda kv: not kv[1].get('enabled', False))
 
         failed = []

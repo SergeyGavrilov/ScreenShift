@@ -320,8 +320,8 @@ def test_restore_previous_works_repeatedly():
 # ── snapshot completeness ─────────────────────────────────────────────────────
 
 def test_snapshot_includes_zero_width_adapters():
-    """Adapters disabled by us (registry width=0) must appear in the snapshot
-    so that restore can explicitly disable them again."""
+    """Profile devices with zero registry (skipped by list_displays) must appear
+    in the snapshot as disabled so restore can explicitly turn them off again."""
     with patch('src.switcher.DisplayManager') as MockDM:
         MockDM.list_displays.return_value = [
             {'name': '\\\\.\\DISPLAY1', 'active': True, 'primary': True},
@@ -330,12 +330,9 @@ def test_snapshot_includes_zero_width_adapters():
             'width': 1920, 'height': 1080, 'refresh_rate': 60,
             'position_x': 0, 'position_y': 0,
         }
-        MockDM.list_all_adapters.return_value = [
-            '\\\\.\\DISPLAY1',
-            '\\\\.\\DISPLAY2',   # disabled by us → not returned by list_displays
-        ]
         from src.switcher import _snapshot
-        result = _snapshot()
+        # DISPLAY2 is in the profile but not returned by list_displays (zero registry)
+        result = _snapshot(profile_devices={'\\\\.\\DISPLAY1', '\\\\.\\DISPLAY2'})
 
     devices = {e['device'] for e in result}
     assert '\\\\.\\DISPLAY2' in devices
@@ -343,12 +340,28 @@ def test_snapshot_includes_zero_width_adapters():
     assert disabled['enabled'] is False
 
 
+def test_snapshot_does_not_include_ghost_adapters_outside_profile():
+    """Devices NOT in the profile (e.g. virtual RemoteFX adapters) must NOT
+    appear in the snapshot even if they exist as system adapters."""
+    with patch('src.switcher.DisplayManager') as MockDM:
+        MockDM.list_displays.return_value = [
+            {'name': '\\\\.\\DISPLAY1', 'active': True, 'primary': True},
+        ]
+        MockDM.get_current_settings.return_value = {
+            'width': 1920, 'height': 1080, 'refresh_rate': 60,
+            'position_x': 0, 'position_y': 0,
+        }
+        from src.switcher import _snapshot
+        # Only DISPLAY1 is in the profile — DISPLAY2…20 should not appear
+        result = _snapshot(profile_devices={'\\\\.\\DISPLAY1'})
+
+    devices = {e['device'] for e in result}
+    assert devices == {'\\\\.\\DISPLAY1'}
+
+
 def test_restore_disables_previously_unseen_display():
-    """After switching, restore must disable a display that wasn't in the snapshot
-    because it had zero registry width when the snapshot was taken."""
-    # Snapshot captured only DISPLAY1 as active; DISPLAY2 was zero-width (our disable).
-    # After the switch to Profile2, DISPLAY2 is now active.
-    # Restore must disable DISPLAY2 again.
+    """After switching, restore must disable a display that was in the profile
+    but had zero registry width when the pre-switch snapshot was taken."""
     switcher_module._previous_state = [
         {
             'device': '\\\\.\\DISPLAY1', 'enabled': True,
@@ -361,7 +374,6 @@ def test_restore_disables_previously_unseen_display():
          patch('src.switcher.WindowMigrator'), \
          patch('src.switcher.time.sleep'):
         MockDM.list_displays.return_value = []
-        MockDM.list_all_adapters.return_value = []
         _ok(MockDM)
         restore_previous()
 
