@@ -7,8 +7,9 @@ import pystray
 from PIL import Image, ImageDraw
 
 from src.autostart import autostart_enable
-from src.config import APP_NAME, CONFIG_PATH, Config
+from src.config import APP_NAME, BASE_DIR, CONFIG_PATH, Config
 from src.display import DisplayManager
+import src.logger as _logger
 import src.switcher as _switcher
 from src.switcher import detect_active_profile, switch_to, restore_previous
 
@@ -29,11 +30,17 @@ def _make_icon() -> Image.Image:
 class ScreenShiftApp:
 
     def __init__(self):
+        _logger.setup(BASE_DIR)
+        self._log = _logger.get()
         self.cfg  = Config()
         self.icon = None
         if self.cfg.autostart:
             autostart_enable()
         _switcher._current_profile = detect_active_profile(self.cfg.profiles)
+        self._log.info(
+            "Started — active profile: %s",
+            _switcher._current_profile or 'none detected',
+        )
         self._register_hotkeys()
 
     def _register_hotkeys(self) -> None:
@@ -60,6 +67,14 @@ class ScreenShiftApp:
             self.icon.title = f"{APP_NAME} — {cp}" if cp else APP_NAME
             self.icon.menu  = self._build_menu()   # rebuild so enabled/checked states refresh
 
+    def _reload_config(self) -> None:
+        keyboard.clear_all_hotkeys()
+        self.cfg = Config()
+        _switcher._current_profile = detect_active_profile(self.cfg.profiles)
+        self._register_hotkeys()
+        self._log.info("Config reloaded")
+        self._notify("Config reloaded")
+
     def _build_menu(self) -> pystray.Menu:
         items = []
         for p in self.cfg.profiles:
@@ -74,6 +89,7 @@ class ScreenShiftApp:
             ))
         restore_hk    = self.cfg.restore_hotkey
         restore_label = f'Restore previous  [{restore_hk}]' if restore_hk else 'Restore previous'
+        log_path      = BASE_DIR / _logger.LOG_FILENAME
         items += [
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
@@ -84,12 +100,19 @@ class ScreenShiftApp:
                 enabled=lambda _: _switcher._previous_state is not None,
             ),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem('List Monitors', lambda _: threading.Thread(
+            pystray.MenuItem('List Monitors',  lambda _: threading.Thread(
                 target=self._show_monitors, daemon=True,
             ).start()),
-            pystray.MenuItem('Open Config',   lambda _: os.startfile(str(CONFIG_PATH))),
+            pystray.MenuItem('Open Config',    lambda _: os.startfile(str(CONFIG_PATH))),
+            pystray.MenuItem('Reload Config',  lambda _: threading.Thread(
+                target=self._reload_config, daemon=True,
+            ).start()),
+            pystray.MenuItem('Open Log',
+                lambda _: os.startfile(str(log_path)),
+                enabled=lambda _: log_path.exists(),
+            ),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem('Quit',          lambda _: self.icon.stop()),
+            pystray.MenuItem('Quit',           lambda _: self.icon.stop()),
         ]
         return pystray.Menu(*items)
 

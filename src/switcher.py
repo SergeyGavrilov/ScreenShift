@@ -1,9 +1,12 @@
+import logging
 import threading
 import time
 from typing import Optional
 
 from src.display import DisplayManager, DISP_CHANGE_SUCCESSFUL
 from src.migrator import WindowMigrator
+
+_log = logging.getLogger('ScreenShift')
 
 _lock            = threading.Lock()
 _previous_state: Optional[list] = None   # snapshot taken before the last successful switch
@@ -53,15 +56,20 @@ def _snapshot_to_profile(state: list[dict], name: str = 'Previous') -> dict:
 
 def switch_to(profile: dict, notify=None, _bypass_guard: bool = False) -> None:
     global _previous_state, _current_profile
+    name = profile.get('name', '?')
     if (not _bypass_guard
             and _current_profile is not None
-            and _current_profile == profile.get('name')):
+            and _current_profile == name):
+        msg = f"Already active: {name}"
+        _log.info(msg)
         if notify:
-            notify(f"Already active: {profile['name']}")
+            notify(msg)
         return
     if not _lock.acquire(blocking=False):
+        _log.debug("Switch to '%s' dropped — another switch in progress", name)
         return
     try:
+        _log.info("Switching to profile '%s'", name)
         snapshot = _snapshot()
 
         monitors_cfg = profile.get('monitors', {})
@@ -81,29 +89,39 @@ def switch_to(profile: dict, notify=None, _bypass_guard: bool = False) -> None:
             else:
                 ret = DisplayManager.disable_display(device)
 
+            short = device.replace('\\\\.\\', '')
             if ret != DISP_CHANGE_SUCCESSFUL:
-                failed.append(f"{device.replace('\\\\.\\', '')} → code {ret}")
+                failed.append(f"{short} → code {ret}")
+                _log.warning("Staging %s failed (code %d)", short, ret)
+            else:
+                action = 'enabled' if cfg.get('enabled') else 'disabled'
+                _log.debug("Staged %s %s", short, action)
 
         if failed:
+            msg = f"Staging failed: {', '.join(failed)}"
+            _log.error(msg)
             if notify:
-                notify(f"Staging failed: {', '.join(failed)}")
+                notify(msg)
             return
 
         result = DisplayManager.apply_changes()
 
         if result == DISP_CHANGE_SUCCESSFUL:
             _previous_state  = snapshot
-            _current_profile = profile.get('name')
+            _current_profile = name
+            _log.info("Applied profile '%s' successfully", name)
             time.sleep(1.5)
             try:
                 WindowMigrator.migrate_all()
-            except Exception:
-                pass   # window migration is best-effort
+            except Exception as exc:
+                _log.warning("WindowMigrator raised: %s", exc)
             if notify:
-                notify(f"Switched to: {profile['name']}")
+                notify(f"Switched to: {name}")
         else:
+            msg = f"Display change failed (code {result})"
+            _log.error("%s for profile '%s'", msg, name)
             if notify:
-                notify(f"Display change failed (code {result})")
+                notify(msg)
     finally:
         _lock.release()
 
@@ -128,9 +146,12 @@ def detect_active_profile(profiles: list[dict]) -> Optional[str]:
 def restore_previous(notify=None) -> None:
     """Re-apply the display state captured before the last successful switch."""
     if not _previous_state:
+        msg = 'Nothing to restore'
+        _log.info(msg)
         if notify:
-            notify('Nothing to restore')
+            notify(msg)
         return
+    _log.info("Restoring previous display state")
     profile = _snapshot_to_profile(_previous_state)
     # bypass the already-active guard — the state behind 'Previous' changes each time
     switch_to(profile, notify=notify, _bypass_guard=True)
