@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch, call
 
 import src.switcher as switcher_module
 from src.display import DISP_CHANGE_SUCCESSFUL
-from src.switcher import switch_to, restore_previous, _lock
+from src.switcher import switch_to, restore_previous, detect_active_profile, _lock
 
 # reset module-level state before every test
 import pytest
@@ -315,3 +315,92 @@ def test_restore_previous_works_repeatedly():
     # should have switched, not returned "Already active"
     assert MockDM.apply_changes.called
     assert not any('already' in m.lower() for m in calls)
+
+
+# ── snapshot completeness ─────────────────────────────────────────────────────
+
+def test_snapshot_includes_zero_width_adapters():
+    """Adapters disabled by us (registry width=0) must appear in the snapshot
+    so that restore can explicitly disable them again."""
+    with patch('src.switcher.DisplayManager') as MockDM:
+        MockDM.list_displays.return_value = [
+            {'name': '\\\\.\\DISPLAY1', 'active': True, 'primary': True},
+        ]
+        MockDM.get_current_settings.return_value = {
+            'width': 1920, 'height': 1080, 'refresh_rate': 60,
+            'position_x': 0, 'position_y': 0,
+        }
+        MockDM.list_all_adapters.return_value = [
+            '\\\\.\\DISPLAY1',
+            '\\\\.\\DISPLAY2',   # disabled by us → not returned by list_displays
+        ]
+        from src.switcher import _snapshot
+        result = _snapshot()
+
+    devices = {e['device'] for e in result}
+    assert '\\\\.\\DISPLAY2' in devices
+    disabled = next(e for e in result if e['device'] == '\\\\.\\DISPLAY2')
+    assert disabled['enabled'] is False
+
+
+def test_restore_disables_previously_unseen_display():
+    """After switching, restore must disable a display that wasn't in the snapshot
+    because it had zero registry width when the snapshot was taken."""
+    # Snapshot captured only DISPLAY1 as active; DISPLAY2 was zero-width (our disable).
+    # After the switch to Profile2, DISPLAY2 is now active.
+    # Restore must disable DISPLAY2 again.
+    switcher_module._previous_state = [
+        {
+            'device': '\\\\.\\DISPLAY1', 'enabled': True,
+            'width': 1920, 'height': 1080, 'refresh_rate': 60,
+            'position_x': 0, 'position_y': 0,
+        },
+        {'device': '\\\\.\\DISPLAY2', 'enabled': False},
+    ]
+    with patch('src.switcher.DisplayManager') as MockDM, \
+         patch('src.switcher.WindowMigrator'), \
+         patch('src.switcher.time.sleep'):
+        MockDM.list_displays.return_value = []
+        MockDM.list_all_adapters.return_value = []
+        _ok(MockDM)
+        restore_previous()
+
+    MockDM.disable_display.assert_called_with('\\\\.\\DISPLAY2')
+
+
+# ── detect_active_profile ─────────────────────────────────────────────────────
+
+_PROFILES = [
+    {
+        'name': 'Work',
+        'monitors': {
+            '\\\\.\\DISPLAY1': {'enabled': True},
+            '\\\\.\\DISPLAY2': {'enabled': False},
+        },
+    },
+    {
+        'name': 'Gaming',
+        'monitors': {
+            '\\\\.\\DISPLAY1': {'enabled': False},
+            '\\\\.\\DISPLAY2': {'enabled': True},
+        },
+    },
+]
+
+
+def test_detect_active_profile_matches_correctly():
+    with patch('src.switcher.DisplayManager') as MockDM:
+        MockDM.list_displays.return_value = [
+            {'name': '\\\\.\\DISPLAY1', 'active': True},
+            {'name': '\\\\.\\DISPLAY2', 'active': False},
+        ]
+        assert detect_active_profile(_PROFILES) == 'Work'
+
+
+def test_detect_active_profile_returns_none_when_no_match():
+    with patch('src.switcher.DisplayManager') as MockDM:
+        MockDM.list_displays.return_value = [
+            {'name': '\\\\.\\DISPLAY1', 'active': True},
+            {'name': '\\\\.\\DISPLAY2', 'active': True},
+        ]
+        assert detect_active_profile(_PROFILES) is None

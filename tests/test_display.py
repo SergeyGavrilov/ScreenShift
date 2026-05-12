@@ -292,6 +292,49 @@ def test_disable_display_uses_registry_flags(mock_windll):
 
 # ── apply_changes ─────────────────────────────────────────────────────────────
 
+# ── list_all_adapters ─────────────────────────────────────────────────────────
+
+def test_list_all_adapters_includes_zero_width_inactive(mock_windll):
+    # Adapter that list_displays() would skip (inactive + zero registry width)
+    # must still be returned by list_all_adapters().
+    call_count = 0
+
+    def fake_enum(name, index, dd_ptr, flags):
+        nonlocal call_count
+        if call_count > 0:
+            return 0
+        dd = dd_ptr._obj
+        dd.DeviceName = '\\\\.\\DISPLAY1'
+        dd.StateFlags = 0   # inactive, zero registry → filtered by list_displays
+        call_count += 1
+        return 1
+
+    mock_windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
+
+    result = DisplayManager.list_all_adapters()
+    assert result == ['\\\\.\\DISPLAY1']
+
+
+def test_list_all_adapters_skips_mirror_driver(mock_windll):
+    call_count = 0
+
+    def fake_enum(name, index, dd_ptr, flags):
+        nonlocal call_count
+        if call_count > 0:
+            return 0
+        dd = dd_ptr._obj
+        dd.DeviceName = '\\\\.\\DISPLAY9'
+        dd.StateFlags = DISPLAY_DEVICE_MIRRORING_DRIVER
+        call_count += 1
+        return 1
+
+    mock_windll.user32.EnumDisplayDevicesW.side_effect = fake_enum
+
+    assert DisplayManager.list_all_adapters() == []
+
+
+# ── apply_changes ─────────────────────────────────────────────────────────────
+
 def test_apply_changes_calls_api_with_nulls(mock_windll):
     mock_windll.user32.ChangeDisplaySettingsExW.return_value = DISP_CHANGE_SUCCESSFUL
 

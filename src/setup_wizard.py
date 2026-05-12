@@ -338,7 +338,11 @@ class SetupWizard:
                 'hotkey':   row['hotkey_var'].get(),
                 'monitors': monitors,
             })
-        return {'autostart': self.autostart_var.get(), 'profiles': profiles}
+        return {
+            'autostart':      self.autostart_var.get(),
+            'restore_hotkey': 'ctrl+alt+0',
+            'profiles':       profiles,
+        }
 
     # ── install ───────────────────────────────────────────────────────────────
 

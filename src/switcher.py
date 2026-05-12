@@ -15,13 +15,20 @@ _current_profile: Optional[str] = None   # name of the last successfully applied
 def _snapshot() -> list[dict]:
     """Capture the current active/inactive state of all known displays."""
     result = []
+    seen: set[str] = set()
     for d in DisplayManager.list_displays():
+        seen.add(d['name'])
         entry: dict = {'device': d['name'], 'enabled': d['active']}
         if d['active']:
             settings = DisplayManager.get_current_settings(d['name'])
             if settings:
                 entry.update(settings)
         result.append(entry)
+    # list_displays() skips adapters that were disabled by us (registry width=0).
+    # Include them explicitly as disabled so restore will turn them back off.
+    for name in DisplayManager.list_all_adapters():
+        if name not in seen:
+            result.append({'device': name, 'enabled': False})
     return result
 
 
@@ -99,6 +106,23 @@ def switch_to(profile: dict, notify=None, _bypass_guard: bool = False) -> None:
                 notify(f"Display change failed (code {result})")
     finally:
         _lock.release()
+
+
+def detect_active_profile(profiles: list[dict]) -> Optional[str]:
+    """Return the name of the profile whose enabled-monitor set matches current state.
+    Used on startup so the menu checkmark and already-active guard are correct."""
+    try:
+        current_active = {d['name'] for d in DisplayManager.list_displays() if d['active']}
+    except Exception:
+        return None
+    for profile in profiles:
+        monitors = profile.get('monitors', {})
+        if not monitors:
+            continue
+        profile_active = {dev for dev, cfg in monitors.items() if cfg.get('enabled')}
+        if profile_active == current_active:
+            return profile['name']
+    return None
 
 
 def restore_previous(notify=None) -> None:

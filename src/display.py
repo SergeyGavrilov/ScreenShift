@@ -71,6 +71,22 @@ class DISPLAY_DEVICE(ctypes.Structure):
 class DisplayManager:
 
     @staticmethod
+    def list_all_adapters() -> list[str]:
+        """Names of all real (non-mirror) adapters — no ghost filtering.
+        Used by the snapshot to include adapters we previously disabled
+        (their registry width is 0, so list_displays() would skip them)."""
+        result, i = [], 0
+        while True:
+            dd = DISPLAY_DEVICE()
+            dd.cb = ctypes.sizeof(DISPLAY_DEVICE)
+            if not ctypes.windll.user32.EnumDisplayDevicesW(None, i, ctypes.byref(dd), 0):
+                break
+            i += 1
+            if dd.DeviceName and not (dd.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER):
+                result.append(dd.DeviceName)
+        return result
+
+    @staticmethod
     def list_displays() -> list[dict]:
         result, i = [], 0
         while True:

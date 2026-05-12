@@ -10,7 +10,7 @@ from src.autostart import autostart_enable
 from src.config import APP_NAME, CONFIG_PATH, Config
 from src.display import DisplayManager
 import src.switcher as _switcher
-from src.switcher import switch_to, restore_previous
+from src.switcher import detect_active_profile, switch_to, restore_previous
 
 
 def _make_icon() -> Image.Image:
@@ -33,6 +33,7 @@ class ScreenShiftApp:
         self.icon = None
         if self.cfg.autostart:
             autostart_enable()
+        _switcher._current_profile = detect_active_profile(self.cfg.profiles)
         self._register_hotkeys()
 
     def _register_hotkeys(self) -> None:
